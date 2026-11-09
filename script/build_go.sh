@@ -14,7 +14,13 @@ fi
 
 if [[ "$GOOS" == "windows" || "$GOOS" == "linux" ]]; then
     FILE=$([[ "$GOOS" == "windows" ]] && echo "updater-windows-x${GOARCH: -2}.exe" || echo "updater-linux-$GOARCH")
-    curl -fLso "$DEST/updater$([[ "$GOOS" == "windows" ]] && echo ".exe")" "https://github.com/throneproj/updater/releases/latest/download/$FILE"
+    for attempt in {1..5}; do
+        if curl -fLso "$DEST/updater$([[ "$GOOS" == "windows" ]] && echo ".exe")" "https://github.com/throneproj/updater/releases/latest/download/$FILE"; then
+            break
+        fi
+        echo "Download updater failed (attempt $attempt), retrying in 3s..."
+        sleep 3
+    done
     [[ "$GOOS" == "linux" ]] && chmod +x "$DEST/updater"
 fi
 

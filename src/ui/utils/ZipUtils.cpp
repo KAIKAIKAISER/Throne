@@ -21,10 +21,12 @@ bool ZipUtils::extractZip(const QString &zipFilePath, const QString &destDirPath
     // 1. Try tar.exe (built-in on Windows 10 17063+ and Windows 11)
     {
         QProcess proc;
+        proc.setProcessChannelMode(QProcess::MergedChannels);
+        proc.closeWriteChannel();
         QStringList args;
         args << "-xf" << QDir::toNativeSeparators(zipFilePath) << "-C" << QDir::toNativeSeparators(destDirPath);
         proc.start("tar.exe", args);
-        if (proc.waitForFinished(20000) && proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0) {
+        if (proc.waitForFinished(10000) && proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0) {
             return true;
         }
     }
@@ -32,13 +34,15 @@ bool ZipUtils::extractZip(const QString &zipFilePath, const QString &destDirPath
     // 2. Fallback to PowerShell Expand-Archive
     {
         QProcess proc;
+        proc.setProcessChannelMode(QProcess::MergedChannels);
+        proc.closeWriteChannel();
         QStringList args;
         args << "-NoProfile" << "-NonInteractive" << "-Command"
              << QStringLiteral("Expand-Archive -LiteralPath '%1' -DestinationPath '%2' -Force")
                     .arg(QDir::toNativeSeparators(zipFilePath))
                     .arg(QDir::toNativeSeparators(destDirPath));
         proc.start("powershell.exe", args);
-        if (proc.waitForFinished(35000) && proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0) {
+        if (proc.waitForFinished(15000) && proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0) {
             return true;
         }
     }
@@ -46,10 +50,12 @@ bool ZipUtils::extractZip(const QString &zipFilePath, const QString &destDirPath
     // 1. Try unzip on Unix/macOS
     {
         QProcess proc;
+        proc.setProcessChannelMode(QProcess::MergedChannels);
+        proc.closeWriteChannel();
         QStringList args;
         args << "-q" << "-o" << zipFilePath << "-d" << destDirPath;
         proc.start("unzip", args);
-        if (proc.waitForFinished(20000) && proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0) {
+        if (proc.waitForFinished(10000) && proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0) {
             return true;
         }
     }
@@ -57,10 +63,12 @@ bool ZipUtils::extractZip(const QString &zipFilePath, const QString &destDirPath
     // 2. Try tar on Unix/macOS
     {
         QProcess proc;
+        proc.setProcessChannelMode(QProcess::MergedChannels);
+        proc.closeWriteChannel();
         QStringList args;
         args << "-xf" << zipFilePath << "-C" << destDirPath;
         proc.start("tar", args);
-        if (proc.waitForFinished(20000) && proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0) {
+        if (proc.waitForFinished(10000) && proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0) {
             return true;
         }
     }

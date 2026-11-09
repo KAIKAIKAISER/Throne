@@ -7,7 +7,6 @@ QMainWindow, QDialog {
 
 QWidget {
     color: #4c4f69;
-    font-size: 13px;
     selection-background-color: #1e66f5;
     selection-color: #ffffff;
 }

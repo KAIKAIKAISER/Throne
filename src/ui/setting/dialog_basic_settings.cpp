@@ -380,11 +380,14 @@ DialogBasicSettings::DialogBasicSettings(QWidget *parent)
         QString errorMsg;
         if (themeManager()->importThemeFromZip(zipPath, outThemeName, errorMsg)) {
             refreshThemeList();
+            ui->theme->blockSignals(true);
             ui->theme->setCurrentText(outThemeName);
+            ui->theme->blockSignals(false);
             themeManager()->ApplyTheme(outThemeName);
             Configs::dataManager->settingsRepo->theme = outThemeName;
             Configs::dataManager->settingsRepo->Save();
             updateThemeButtons();
+            refreshUrlSchemeStatus();
             QMessageBox::information(this, tr("Import Theme"),
                                      tr("Theme \"%1\" imported and applied successfully!").arg(outThemeName));
         } else {
@@ -411,11 +414,14 @@ DialogBasicSettings::DialogBasicSettings(QWidget *parent)
             QString errorMsg;
             if (themeManager()->deleteTheme(cur, errorMsg)) {
                 refreshThemeList();
+                ui->theme->blockSignals(true);
                 ui->theme->setCurrentText(QStringLiteral("System"));
+                ui->theme->blockSignals(false);
                 themeManager()->ApplyTheme(QStringLiteral("System"));
                 Configs::dataManager->settingsRepo->theme = QStringLiteral("System");
                 Configs::dataManager->settingsRepo->Save();
                 updateThemeButtons();
+                refreshUrlSchemeStatus();
                 QMessageBox::information(this, tr("Delete Theme"), tr("Theme deleted successfully."));
             } else {
                 QMessageBox::warning(this, tr("Delete Theme Failed"), errorMsg);
