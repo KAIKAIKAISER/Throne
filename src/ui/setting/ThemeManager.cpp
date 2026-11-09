@@ -332,7 +332,7 @@ static QString rewriteQssUrls(const QString &qss, const QString &themeDir) {
     QString normDir = QDir::fromNativeSeparators(themeDir);
     if (!normDir.endsWith('/')) normDir += '/';
 
-    static const QRegularExpression urlRegex(QStringLiteral(R"(url\(\s*(["']?)([^)"']+)\1\s*\))"));
+    static const QRegularExpression urlRegex(QStringLiteral("url\\(\\s*([\"']?)([^)\"']+)\\1\\s*\\)"));
     QString result;
     int lastPos = 0;
     auto it = urlRegex.globalMatch(qss);

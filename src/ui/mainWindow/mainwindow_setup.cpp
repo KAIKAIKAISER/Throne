@@ -1080,7 +1080,7 @@ void MainWindow::applyUiIcons() {
     ui->toolButton_testing->setIcon(Icon::GetUiIcon(QStringLiteral("b-testing-button")));
     ui->toolButton_routing->setIcon(Icon::GetUiIcon(QStringLiteral("b-network-routing")));
     ui->toolButton_tools->setIcon(Icon::GetUiIcon(QStringLiteral("b-tools-button")));
-    if (btnFilter) btnFilter->setIcon(Icon::GetUiIcon(QStringLiteral("filter")));
-    if (tray != nullptr) tray->setIcon(Icon::GetTrayIcon(iconStatus));
-    QApplication::setWindowIcon(Icon::GetTaskbarIcon(iconStatus));
+    if (logFilterButton) logFilterButton->setIcon(Icon::GetUiIcon(QStringLiteral("filter")));
+    if (tray != nullptr) tray->setIcon(Icon::GetTrayIcon(icon_status));
+    QApplication::setWindowIcon(Icon::GetTaskbarIcon(icon_status));
 }
