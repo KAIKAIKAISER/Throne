@@ -1081,6 +1081,7 @@ void MainWindow::applyUiIcons() {
     ui->toolButton_routing->setIcon(Icon::GetUiIcon(QStringLiteral("b-network-routing")));
     ui->toolButton_tools->setIcon(Icon::GetUiIcon(QStringLiteral("b-tools-button")));
     if (logFilterButton) logFilterButton->setIcon(Icon::GetUiIcon(QStringLiteral("filter")));
-    if (tray != nullptr) tray->setIcon(Icon::GetTrayIcon(icon_status));
-    QApplication::setWindowIcon(Icon::GetTaskbarIcon(icon_status));
+    const auto currentStatus = icon_status.value_or(Icon::TrayIconStatus::None);
+    if (tray != nullptr) tray->setIcon(Icon::GetTrayIcon(currentStatus));
+    QApplication::setWindowIcon(Icon::GetTaskbarIcon(currentStatus));
 }
