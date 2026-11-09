@@ -1,0 +1,38 @@
+{
+  "id": "catppuccin_latte",
+  "name": "Catppuccin Latte",
+  "author": "Catppuccin Org",
+  "version": "1.0",
+  "description": "Soothing warm light theme from Catppuccin for Throne",
+  "dark": false,
+  "base_style": "windows11",
+  "style": "style.qss",
+  "colors": {
+    "window": "#eff1f5",
+    "windowText": "#4c4f69",
+    "base": "#ffffff",
+    "alternateBase": "#e6e9ef",
+    "text": "#4c4f69",
+    "button": "#e6e9ef",
+    "buttonText": "#4c4f69",
+    "brightText": "#ffffff",
+    "highlight": "#1e66f5",
+    "highlightedText": "#ffffff",
+    "link": "#1e66f5",
+    "tooltipBase": "#4c4f69",
+    "tooltipText": "#eff1f5",
+    "placeholder": "#9ca0b0",
+    "disabledText": "#9ca0b0",
+    "runningRow": "#dce0e8"
+  },
+  "tokens": {
+    "accent": "#1e66f5",
+    "surface": "#eff1f5",
+    "onSurface": "#4c4f69",
+    "muted": "#7c7f93",
+    "tag": "#ea76cb",
+    "danger": "#d20f39",
+    "success": "#40a02b",
+    "info": "#179299"
+  }
+}
