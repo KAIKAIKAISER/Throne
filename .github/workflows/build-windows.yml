@@ -130,19 +130,16 @@ jobs:
             cp -r "themes" "$DEST/" || true
           fi
 
-      - name: Deploy Qt runtime dependencies
+      - name: Deploy Runtime Dependencies
         shell: pwsh
         env:
           DEST: ${{ github.workspace }}/deployment/windows-amd64
         run: |
-          $windeployqt = Join-Path $PWD "Qt\bin\windeployqt.exe"
-          $exePath = Join-Path $env:DEST "Throne.exe"
-          if (Test-Path $windeployqt) {
-            & $windeployqt --release --no-translations --compiler-runtime $exePath
-          }
           Get-ChildItem -Path "openssl\bin\*.dll", "openssl\*.dll" -ErrorAction SilentlyContinue | ForEach-Object {
             Copy-Item -Path $_.FullName -Destination $env:DEST -Force
           }
+          Write-Output "Deployment directory contents:"
+          Get-ChildItem -Path $env:DEST
 
       - name: Determine Release Tag
         id: release_info
