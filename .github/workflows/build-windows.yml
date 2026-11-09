@@ -16,7 +16,7 @@ on:
       tag:
         description: "Release version tag (e.g. 1.0.0)"
         required: false
-        default: "windows-x64"
+        default: ""
 
 env:
   GO_VERSION: "1.24.1"
@@ -28,7 +28,7 @@ jobs:
     name: Build Throne Windows x64
     runs-on: windows-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -144,14 +144,27 @@ jobs:
             Copy-Item -Path $_.FullName -Destination $env:DEST -Force
           }
 
+      - name: Determine Release Tag
+        id: release_info
+        shell: pwsh
+        run: |
+          $inputTag = "${{ github.event.inputs.tag }}"
+          if ($inputTag -and $inputTag.Trim() -ne "") {
+            $tag = $inputTag.Trim()
+          } else {
+            $date = Get-Date -Format "yyyy.MM.dd"
+            $tag = "v${date}-build${{ github.run_number }}"
+          }
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+          Write-Output "Release Tag: $tag"
+
       - name: Package Windows x64 Archive
         shell: pwsh
         env:
           DEST: ${{ github.workspace }}/deployment/windows-amd64
+          TAG: ${{ steps.release_info.outputs.tag }}
         run: |
-          $ver = "${{ github.event.inputs.tag }}"
-          if (-not $ver -or $ver -eq "") { $ver = "windows-x64" }
-          $zipName = "Throne-$ver.zip"
+          $zipName = "Throne-$env:TAG-windows-amd64.zip"
           Compress-Archive -Path "$env:DEST\*" -DestinationPath $zipName -Force
           Write-Output "Created $zipName"
 
@@ -161,3 +174,34 @@ jobs:
           name: Throne-Windows-x64
           path: Throne-*.zip
           if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_info.outputs.tag }}
+          name: Throne Windows x64 ${{ steps.release_info.outputs.tag }}
+          body: |
+            ## Throne Windows x64 (Custom Theme Edition)
+
+            Automated release build for Throne with third-party custom theme and icon pack support.
+
+            ### ✨ Key Features
+            - **Third-Party Theme Support**: Import any `.zip` theme package in Basic Settings without recompilation.
+            - **Live Switching of QSS & Palette**: Freely switch stylesheets, color palette, dark/light title bars on the fly.
+            - **Complete UI & Tray Icon Customization**: Customize all UI toolbar buttons, material action icons, and status tray icons (`Throne`, `Off`, `Connecting`, `Proxy`, `Tun`).
+            - **Built-in / Bundled Themes**:
+              - 🐱 **Catppuccin Latte** (Warm light mode with custom icons)
+              - 🧛 **Dracula** (Dark aesthetic mode with custom icons)
+              - ❄️ **Nord** (Arctic clean blue mode with custom icons)
+
+            ### 📦 Files
+            - `Throne-*-windows-amd64.zip`: Ready-to-run portable Windows x64 client.
+            - `CatppuccinLatte.zip`, `Dracula.zip`, `Nord.zip`: Standalone theme ZIP packages for importing into Throne.
+          files: |
+            Throne-*.zip
+            themes/*.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
