@@ -7,6 +7,7 @@
 #include <QMimeData>
 #include <QResizeEvent>
 #include <QTimer>
+#include <QScopedValueRollback>
 
 #include "include/engine/connection/ConnectionManager.h"
 #include "include/ui/widget/TrayOtpCodes.hpp"
@@ -38,6 +39,12 @@ void MainWindow::changeEvent(QEvent *event) {
     const QEvent::Type type = event->type();
 
     if (type == QEvent::FontChange) {
+        static bool handlingFontChange = false;
+        if (handlingFontChange) {
+            QMainWindow::changeEvent(event);
+            return;
+        }
+        const QScopedValueRollback guard(handlingFontChange, true);
         // QStyleSheetStyle caches font metrics and ignores FontChange; toggling the stylesheet repolishes.
         auto refreshStylesheetCache = [](QWidget *w) {
             const QString ss = w->styleSheet();
