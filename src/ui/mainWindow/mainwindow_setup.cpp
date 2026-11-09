@@ -79,6 +79,9 @@ MainWindow *UI_InitMainWindow() {
 }
 
 static bool themeUsesDarkLog(const QString &theme) {
+    if (themeManager()->isCurrentThemeDark()) {
+        return true;
+    }
     const auto lower = theme.toLower();
     if (lower.contains("vista") || lower.contains("flatgray") || lower.contains("lightblue") || lower.contains("softpink")) {
         return false;
@@ -223,6 +226,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         setLogHighlighter(themeUsesDarkLog(theme));
         applyLogBrowserFont();
         scheduleProxyListRefresh();
+        applyUiIcons();
     });
     SetUserLogSink([=,this](const QString &log) {
         append_log(log);
@@ -611,8 +615,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     this->refresh_groups();
 
     tray = new TrayIcon(this);
-    tray->setIcon(Icon::GetTrayIcon(Icon::TrayIconStatus::None));
-    QApplication::setWindowIcon(Icon::GetTaskbarIcon(Icon::TrayIconStatus::None));
+    applyUiIcons();
     trayMenu = new QMenu();
     trayMenu->addAction(ui->actionShow_window);
     trayMenu->addSeparator();
@@ -1070,3 +1073,14 @@ void MainWindow::setupTrafficGraph() {
     refresh_traffic_graph_settings();
 }
 
+
+void MainWindow::applyUiIcons() {
+    ui->toolButton_program->setIcon(Icon::GetUiIcon(QStringLiteral("b-system-run")));
+    ui->toolButton_preferences->setIcon(Icon::GetUiIcon(QStringLiteral("b-preferences")));
+    ui->toolButton_testing->setIcon(Icon::GetUiIcon(QStringLiteral("b-testing-button")));
+    ui->toolButton_routing->setIcon(Icon::GetUiIcon(QStringLiteral("b-network-routing")));
+    ui->toolButton_tools->setIcon(Icon::GetUiIcon(QStringLiteral("b-tools-button")));
+    if (btnFilter) btnFilter->setIcon(Icon::GetUiIcon(QStringLiteral("filter")));
+    if (tray != nullptr) tray->setIcon(Icon::GetTrayIcon(iconStatus));
+    QApplication::setWindowIcon(Icon::GetTaskbarIcon(iconStatus));
+}

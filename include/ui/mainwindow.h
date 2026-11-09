@@ -347,6 +347,8 @@ private:
 
     void setupLogView();
 
+    void applyUiIcons();
+
     void releaseHeldLogs();
 
     // Caps both queues at max_log_line; returns how many dropped lines were visible (rendered blocks).

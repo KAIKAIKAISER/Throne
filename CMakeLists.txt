@@ -212,6 +212,8 @@ set(PROJECT_SOURCES
         include/ui/setting/ThemeManager.hpp
         src/ui/setting/ThemeManager.cpp
         src/ui/setting/Icon.cpp
+        include/ui/utils/ZipUtils.hpp
+        src/ui/utils/ZipUtils.cpp
 
         src/ui/mainWindow/mainwindow_setup.cpp
         src/ui/mainWindow/mainwindow_events.cpp

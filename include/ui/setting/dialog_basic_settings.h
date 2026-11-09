@@ -44,6 +44,10 @@ private:
 
     void refreshUrlSchemeStatus();
 
+    void refreshThemeList();
+
+    void updateThemeButtons();
+
     void downloadXrayGeoAsset(const QString &url, const QString &fileName);
 
     void rememberGeoAssetUrl(QComboBox *combo, const QString &url, QStringList &history);

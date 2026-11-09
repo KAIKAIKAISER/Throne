@@ -1,3 +1,4 @@
+#include "include/ui/setting/Icon.hpp"
 #include "include/ui/mainwindow.h"
 
 #include <QAction>
@@ -97,7 +98,7 @@ void MainWindow::setupLogView() {
     logJumpLatestButton->setToolTip(tr("New logs are held while the view is scrolled up"));
     connect(logJumpLatestButton, &QToolButton::clicked, this, [this] { releaseHeldLogs(); });
     logFilterButton = new QToolButton(this);
-    logFilterButton->setIcon(QIcon(":/icon/filter.png"));
+    logFilterButton->setIcon(Icon::GetUiIcon(QStringLiteral("filter")));
     logFilterButton->setCheckable(true);
     connect(logFilterButton, &QToolButton::toggled, this, &MainWindow::setLogFilterVisible);
     for (auto *w : ui->logToolbar->findChildren<QWidget*>()) w->installEventFilter(this);

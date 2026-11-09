@@ -1,3 +1,4 @@
+#include "include/ui/setting/Icon.hpp"
 #include "include/ui/mainwindow.h"
 #include "include/api/RPC.h"
 #include "include/configs/outbounds/chain.h"
@@ -281,7 +282,7 @@ void MainWindow::applyConnectionSort(Stats::ConnectionSort sort)
 void MainWindow::setupConnectionFilter()
 {
     auto* btnFilter = new QToolButton(this);
-    btnFilter->setIcon(QIcon(":/icon/filter.png"));
+    btnFilter->setIcon(Icon::GetUiIcon(QStringLiteral("filter")));
     btnFilter->setToolTip(tr("Enable Filter"));
     btnFilter->setCheckable(true);
     connect(btnFilter, &QToolButton::toggled, connectionFilterHeader, &ConnectionsFilterHeader::setFiltersVisible);

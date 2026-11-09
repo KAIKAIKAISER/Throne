@@ -1,0 +1,38 @@
+{
+  "id": "nord",
+  "name": "Nord",
+  "author": "Nord Theme",
+  "version": "1.0",
+  "description": "An arctic, north-bluish clean theme for Throne",
+  "dark": true,
+  "base_style": "windows11",
+  "style": "style.qss",
+  "colors": {
+    "window": "#2e3440",
+    "windowText": "#eceff4",
+    "base": "#242933",
+    "alternateBase": "#2e3440",
+    "text": "#eceff4",
+    "button": "#3b4252",
+    "buttonText": "#eceff4",
+    "brightText": "#ffffff",
+    "highlight": "#88c0d0",
+    "highlightedText": "#2e3440",
+    "link": "#81a1c1",
+    "tooltipBase": "#2e3440",
+    "tooltipText": "#eceff4",
+    "placeholder": "#4c566a",
+    "disabledText": "#4c566a",
+    "runningRow": "#3b4252"
+  },
+  "tokens": {
+    "accent": "#88c0d0",
+    "surface": "#2e3440",
+    "onSurface": "#eceff4",
+    "muted": "#4c566a",
+    "tag": "#b48ead",
+    "danger": "#bf616a",
+    "success": "#a3be8c",
+    "info": "#81a1c1"
+  }
+}

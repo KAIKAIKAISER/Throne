@@ -1,0 +1,38 @@
+{
+  "id": "dracula",
+  "name": "Dracula",
+  "author": "Dracula Theme",
+  "version": "1.0",
+  "description": "Dracula dark aesthetic theme for Throne",
+  "dark": true,
+  "base_style": "windows11",
+  "style": "style.qss",
+  "colors": {
+    "window": "#282a36",
+    "windowText": "#f8f8f2",
+    "base": "#21222c",
+    "alternateBase": "#282a36",
+    "text": "#f8f8f2",
+    "button": "#44475a",
+    "buttonText": "#f8f8f2",
+    "brightText": "#ffffff",
+    "highlight": "#bd93f9",
+    "highlightedText": "#282a36",
+    "link": "#8be9fd",
+    "tooltipBase": "#282a36",
+    "tooltipText": "#f8f8f2",
+    "placeholder": "#6272a4",
+    "disabledText": "#6272a4",
+    "runningRow": "#3a3c4e"
+  },
+  "tokens": {
+    "accent": "#bd93f9",
+    "surface": "#282a36",
+    "onSurface": "#f8f8f2",
+    "muted": "#6272a4",
+    "tag": "#ff79c6",
+    "danger": "#ff5555",
+    "success": "#50fa7b",
+    "info": "#8be9fd"
+  }
+}

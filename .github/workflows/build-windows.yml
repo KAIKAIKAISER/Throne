@@ -1,0 +1,163 @@
+name: Build Windows x64
+
+on:
+  push:
+    branches:
+      - dev
+      - master
+      - main
+  pull_request:
+    branches:
+      - dev
+      - master
+      - main
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release version tag (e.g. 1.0.0)"
+        required: false
+        default: "windows-x64"
+
+env:
+  GO_VERSION: "1.24.1"
+  PROTOC_VERSION: "29.3"
+  QT_VERSION: "6.12.0"
+
+jobs:
+  build-windows-x64:
+    name: Build Throne Windows x64
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Checkout sing-box dashboard
+        uses: actions/checkout@v4
+        with:
+          repository: SagerNet/sing-box-dashboard
+          ref: gh-pages
+          path: dashboard-src
+
+      - name: Bundle web dashboard
+        shell: bash
+        run: |
+          rm -rf dashboard-src/.git || true
+          cp -R dashboard-src/. res/dashboard/
+          test -f res/dashboard/index.html
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: core/go.sum
+
+      - name: Install Protoc
+        shell: pwsh
+        run: |
+          $protocUrl = "https://github.com/protocolbuffers/protobuf/releases/download/v${env:PROTOC_VERSION}/protoc-${env:PROTOC_VERSION}-win64.zip"
+          $zipPath = Join-Path $env:RUNNER_TEMP "protoc.zip"
+          $outPath = Join-Path $env:RUNNER_TEMP "protoc"
+          Invoke-WebRequest -Uri $protocUrl -OutFile $zipPath
+          Expand-Archive -LiteralPath $zipPath -DestinationPath $outPath -Force
+          $binPath = Join-Path $outPath "bin"
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $binPath
+
+      - name: Install protoc plugins and build Go core
+        shell: bash
+        env:
+          DEST: ${{ github.workspace }}/deployment/windows-amd64
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2
+          export PATH="$HOME/go/bin:$PATH"
+          mkdir -p "$DEST"
+          GOOS=windows GOARCH=amd64 ./script/build_go.sh
+
+      - name: Install MSVC compiler
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -prerelease -property installationPath
+          if (-not $vs) { throw 'Visual Studio not found' }
+          $bat = Join-Path $env:RUNNER_TEMP 'vcvars.cmd'
+          Set-Content -LiteralPath $bat -Encoding ascii -Value "@call `"$vs\VC\Auxiliary\Build\vcvarsall.bat`" x64 >nul && set"
+          $vars = & $bat
+          if (-not ($vars -ceq "VSCMD_ARG_TGT_ARCH=x64")) { throw "vcvarsall.bat did not set up x64 tools" }
+          $changed = foreach ($line in $vars) {
+            $name, $value = $line -split '=', 2
+            if ($null -ne $value -and $value -cne [Environment]::GetEnvironmentVariable($name)) { "$name=$value" }
+          }
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value $changed
+
+      - name: Cache Qt and OpenSSL
+        id: cache-winqt
+        uses: actions/cache@v4
+        with:
+          path: |
+            qt.7z
+            openssl.7z
+          key: WinQt-${{ env.QT_VERSION }}-x64
+
+      - name: Download Qt and OpenSSL
+        shell: bash
+        if: steps.cache-winqt.outputs.cache-hit != 'true'
+        run: |
+          curl -fL -o qt.7z "https://github.com/throneproj/buildqt/releases/download/Qt_${QT_VERSION}/Qt_${QT_VERSION}_x64.7z"
+          curl -fL -o openssl.7z "https://github.com/throneproj/env_windows_legacy/releases/download/latest/openssl_x64.7z"
+
+      - name: Build Throne C++ GUI
+        shell: bash
+        env:
+          DEST: ${{ github.workspace }}/deployment/windows-amd64
+        run: |
+          7z x -y qt.7z
+          7z x -y openssl.7z
+          export CMAKE_PREFIX_PATH="$PWD/Qt/lib/cmake"
+          export OPENSSL_ROOT_DIR="$PWD/openssl"
+          mkdir -p build
+          cd build
+          curl -fLso srslist.h "https://raw.githubusercontent.com/throneproj/routeprofiles/rule-set/srslist.h"
+          cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo ..
+          ninja
+          cd ..
+          cp build/Throne.exe "$DEST/"
+          cp build/Throne.pdb "$DEST/" || true
+          if [ -d "themes" ]; then
+            cp -r "themes" "$DEST/" || true
+          fi
+
+      - name: Deploy Qt runtime dependencies
+        shell: pwsh
+        env:
+          DEST: ${{ github.workspace }}/deployment/windows-amd64
+        run: |
+          $windeployqt = Join-Path $PWD "Qt\bin\windeployqt.exe"
+          $exePath = Join-Path $env:DEST "Throne.exe"
+          if (Test-Path $windeployqt) {
+            & $windeployqt --release --no-translations --compiler-runtime $exePath
+          }
+          Get-ChildItem -Path "openssl\bin\*.dll", "openssl\*.dll" -ErrorAction SilentlyContinue | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination $env:DEST -Force
+          }
+
+      - name: Package Windows x64 Archive
+        shell: pwsh
+        env:
+          DEST: ${{ github.workspace }}/deployment/windows-amd64
+        run: |
+          $ver = "${{ github.event.inputs.tag }}"
+          if (-not $ver -or $ver -eq "") { $ver = "windows-x64" }
+          $zipName = "Throne-$ver.zip"
+          Compress-Archive -Path "$env:DEST\*" -DestinationPath $zipName -Force
+          Write-Output "Created $zipName"
+
+      - name: Upload Windows x64 Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Throne-Windows-x64
+          path: Throne-*.zip
+          if-no-files-found: error

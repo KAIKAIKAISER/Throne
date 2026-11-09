@@ -3,6 +3,8 @@
 #include "include/ui/widget/json/JsonEditorDialog.h"
 #include "include/ui/widget/json/SchemaStore.h"
 #include "include/ui/setting/ThemeManager.hpp"
+#include <QDesktopServices>
+#include <QUrl>
 #include "include/ui/setting/Icon.hpp"
 #include "include/ui/utils/GuiUtils.hpp"
 #include "include/global/Configs.hpp"
@@ -356,10 +358,75 @@ DialogBasicSettings::DialogBasicSettings(QWidget *parent)
     const int logFontSize = Configs::dataManager->settingsRepo->log_font_size;
     ui->log_font_size->setCurrentText(Int2String(logFontSize > 0 ? logFontSize : qApp->font().pointSize()));
     CACHE.shownLogFontSize = ui->log_font_size->currentText().toInt();
-    ui->theme->addItems(QStyleFactory::keys());
-    ui->theme->addItem("QDarkStyle");
-    // Custom stylesheet themes, not QStyleFactory keys.
-    ui->theme->addItems({"FlatGray", "LightBlue", "SoftPink", "BlackSoft"});
+    refreshThemeList();
+
+    connect(ui->theme, &QComboBox::currentIndexChanged, this, [this](int index) {
+        const QString selected = ui->theme->currentText().trimmed();
+        if (selected.isEmpty()) return;
+        themeManager()->ApplyTheme(selected);
+        Configs::dataManager->settingsRepo->theme = selected;
+        Configs::dataManager->settingsRepo->Save();
+        updateThemeButtons();
+        refreshUrlSchemeStatus();
+    });
+
+    connect(ui->import_theme, &QPushButton::clicked, this, [this] {
+        const QString zipPath = NativeFileDialog::getOpenFileName(
+            this, tr("Select Theme ZIP"), QDir::homePath(), tr("ZIP Archives (*.zip)")
+        );
+        if (zipPath.isEmpty()) return;
+
+        QString outThemeName;
+        QString errorMsg;
+        if (themeManager()->importThemeFromZip(zipPath, outThemeName, errorMsg)) {
+            refreshThemeList();
+            ui->theme->setCurrentText(outThemeName);
+            themeManager()->ApplyTheme(outThemeName);
+            Configs::dataManager->settingsRepo->theme = outThemeName;
+            Configs::dataManager->settingsRepo->Save();
+            updateThemeButtons();
+            QMessageBox::information(this, tr("Import Theme"),
+                                     tr("Theme \"%1\" imported and applied successfully!").arg(outThemeName));
+        } else {
+            QMessageBox::warning(this, tr("Import Theme Failed"), errorMsg);
+        }
+    });
+
+    connect(ui->open_theme_folder, &QPushButton::clicked, this, [this] {
+        const QString themesDir = ThemeManager::themesDirectory();
+        QDir().mkpath(themesDir);
+        QDesktopServices::openUrl(QUrl::fromLocalFile(themesDir));
+    });
+
+    connect(ui->delete_theme, &QPushButton::clicked, this, [this] {
+        const QString cur = ui->theme->currentText().trimmed();
+        if (!themeManager()->isCustomTheme(cur)) return;
+
+        auto reply = QMessageBox::question(
+            this, tr("Delete Theme"),
+            tr("Are you sure you want to delete the theme \"%1\"?").arg(cur),
+            QMessageBox::Yes | QMessageBox::No
+        );
+        if (reply == QMessageBox::Yes) {
+            QString errorMsg;
+            if (themeManager()->deleteTheme(cur, errorMsg)) {
+                refreshThemeList();
+                ui->theme->setCurrentText(QStringLiteral("System"));
+                themeManager()->ApplyTheme(QStringLiteral("System"));
+                Configs::dataManager->settingsRepo->theme = QStringLiteral("System");
+                Configs::dataManager->settingsRepo->Save();
+                updateThemeButtons();
+                QMessageBox::information(this, tr("Delete Theme"), tr("Theme deleted successfully."));
+            } else {
+                QMessageBox::warning(this, tr("Delete Theme Failed"), errorMsg);
+            }
+        }
+    });
+
+    connect(themeManager(), &ThemeManager::themesListUpdated, this, [this] {
+        refreshThemeList();
+    });
+
     ui->enable_custom_icon->setChecked(Configs::dataManager->settingsRepo->use_custom_icons);
     ui->follow_status_in_taskbar->setChecked(Configs::dataManager->settingsRepo->follow_status_in_taskbar);
     ui->follow_status_in_taskbar->setEnabled(ui->enable_custom_icon->isChecked());
@@ -387,19 +454,6 @@ DialogBasicSettings::DialogBasicSettings(QWidget *parent)
                 QMessageBox::warning(this, "Select custom image error", errors);
             }
         }
-    });
-    bool ok;
-    auto themeId = Configs::dataManager->settingsRepo->theme.toInt(&ok);
-    if (ok) {
-        ui->theme->setCurrentIndex(themeId);
-    } else {
-        ui->theme->setCurrentText(Configs::dataManager->settingsRepo->theme);
-    }
-    connect(ui->theme, &QComboBox::currentIndexChanged, this, [=,this](int index) {
-        themeManager()->ApplyTheme(ui->theme->currentText());
-        Configs::dataManager->settingsRepo->theme = ui->theme->currentText().trimmed();
-        Configs::dataManager->settingsRepo->Save();
-        refreshUrlSchemeStatus();
     });
 
     ui->user_agent->setText(Configs::dataManager->settingsRepo->user_agent);
@@ -1323,3 +1377,49 @@ void DialogBasicSettings::deleteWebDavBackup(const std::shared_ptr<WebDavChooser
     confirm->open();
 }
 
+
+void DialogBasicSettings::refreshThemeList() {
+    QString current = ui->theme->currentText().trimmed();
+    if (current.isEmpty() && Configs::dataManager && Configs::dataManager->settingsRepo) {
+        current = Configs::dataManager->settingsRepo->theme;
+    }
+
+    ui->theme->blockSignals(true);
+    ui->theme->clear();
+
+    ui->theme->addItems(QStyleFactory::keys());
+    ui->theme->addItem(QStringLiteral("QDarkStyle"));
+    ui->theme->addItems({QStringLiteral("FlatGray"), QStringLiteral("LightBlue"),
+                         QStringLiteral("SoftPink"), QStringLiteral("BlackSoft")});
+
+    const QStringList customThemes = themeManager()->availableCustomThemeNames();
+    for (const auto &name : customThemes) {
+        if (ui->theme->findText(name, Qt::MatchFixedString) < 0) {
+            ui->theme->addItem(name);
+        }
+    }
+
+    bool ok;
+    auto themeId = current.toInt(&ok);
+    if (ok) {
+        ui->theme->setCurrentIndex(themeId);
+    } else {
+        int idx = ui->theme->findText(current, Qt::MatchFixedString);
+        if (idx >= 0) {
+            ui->theme->setCurrentIndex(idx);
+        } else {
+            ui->theme->setCurrentText(current);
+        }
+    }
+
+    ui->theme->blockSignals(false);
+    updateThemeButtons();
+}
+
+void DialogBasicSettings::updateThemeButtons() {
+    const QString cur = ui->theme->currentText().trimmed();
+    const bool isCustom = themeManager()->isCustomTheme(cur);
+    if (ui->delete_theme) {
+        ui->delete_theme->setEnabled(isCustom);
+    }
+}

@@ -5,6 +5,13 @@
 #include <QPalette>
 #include <QColor>
 #include <QMap>
+#include <QDir>
+#include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
+#include <QRegularExpression>
+#include <QDateTime>
 #include <QScopedValueRollback>
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
@@ -21,6 +28,9 @@
 #include <cmath>
 
 #include "include/ui/setting/ThemeManager.hpp"
+#include "include/ui/setting/Icon.hpp"
+#include "include/ui/utils/ZipUtils.hpp"
+#include "include/global/Configs.hpp"
 
 #include <QGlobalStatic>
 
@@ -31,20 +41,6 @@ ThemeManager *themeManager() {
 }
 
 extern QString ReadFileText(const QString &path);
-
-struct ThemeColors {
-    QColor window, windowText;
-    QColor base, alternateBase;
-    QColor text;
-    QColor button, buttonText;
-    QColor brightText;
-    QColor highlight, highlightedText;
-    QColor link;            // also the running row's header mark
-    QColor tooltipBase, tooltipText;
-    QColor placeholder;
-    QColor disabledText;
-    QColor runningRow;      // between the sheet's row stripes and its selection fill
-};
 
 static QPalette buildThemePalette(const ThemeColors &c) {
     QPalette p;
@@ -88,8 +84,8 @@ static QPalette buildThemePalette(const ThemeColors &c) {
     return p;
 }
 
-// The keys define "custom theme".
-static const QMap<QString, ThemeColors> &customThemes() {
+// Built-in custom themes.
+static const QMap<QString, ThemeColors> &builtInThemes() {
     static const QMap<QString, ThemeColors> themes = [] {
         QMap<QString, ThemeColors> m;
 
@@ -191,7 +187,7 @@ static QColor separate(QColor c, const QColor &surface, double target) {
         c.getHsl(&h, &s, &l, &a);
         const int next = qBound(0, l + dir * 10, 255);
         if (next == l) break;
-        c.setHsl(h < 0 ? 0 : h, s, next, a); // getHsl reports -1 for achromatic; s is 0 there anyway
+        c.setHsl(h < 0 ? 0 : h, s, next, a);
     }
     return c;
 }
@@ -204,8 +200,6 @@ static QColor paletteAccent(const QPalette &pal) {
 #endif
 }
 
-// Prefers a surface the theme already defines, so the chip looks native to it; falls back to
-// stepping the window itself and mixing in a trace of accent.
 static QColor selectedFill(const QPalette &pal, const QColor &surface, const QColor &onSurface,
                            const QColor &accent) {
     for (const auto role : {QPalette::AlternateBase, QPalette::Base, QPalette::Button, QPalette::Midlight}) {
@@ -233,8 +227,6 @@ static ThemeTokens resolveTokens(const QPalette &pal) {
     return t;
 }
 
-// Literal hex only, so no rule here can resolve against the wrong palette or be served stale
-// from QStyleSheetStyle's render-rule cache.
 static QString overlayStyleSheet(const ThemeTokens &t) {
     const auto hex = [](const QColor &c) { return c.name(QColor::HexRgb); };
     QString sheet = QStringLiteral(
@@ -242,18 +234,14 @@ static QString overlayStyleSheet(const ThemeTokens &t) {
         "*[colorRole=\"tag\"] { color: %2; }\n"
         "*[colorRole=\"danger\"] { color: %3; }\n"
         "*[colorRole=\"success\"] { color: %4; }\n"
-        // Colour only: any border rule makes QStyleSheetStyle replace the native frame.
         "QLineEdit[invalid=\"true\"], QLineEdit[invalid=\"true\"]:focus, QLineEdit[invalid=\"true\"]:hover,\n"
         "QPlainTextEdit[invalid=\"true\"], QTextEdit[invalid=\"true\"],\n"
         "QAbstractSpinBox[invalid=\"true\"], QAbstractSpinBox[invalid=\"true\"]:focus, QAbstractSpinBox[invalid=\"true\"]:hover { color: %3; }\n"
-        // A menu-style popup paints its items under the combo's rule, as :active and never :editable or :read-only.
         "QComboBox[invalid=\"true\"]:editable, QComboBox[invalid=\"true\"]:editable:focus, QComboBox[invalid=\"true\"]:editable:hover,\n"
         "QComboBox[invalid=\"true\"]:read-only, QComboBox[invalid=\"true\"]:read-only:focus, QComboBox[invalid=\"true\"]:read-only:hover,\n"
-        // Qt polishes a non-editable combo's inactive palette without :read-only.
         "QComboBox[invalid=\"true\"]:!editable:!active { color: %3; }\n"
     ).arg(hex(t.muted), hex(t.tag), hex(t.danger), hex(t.success));
 #ifdef Q_OS_MACOS
-    // QMacStyle centres non-document tabs and elides them instead of scrolling.
     sheet += QStringLiteral(
         "QTabWidget::tab-bar { alignment: left; }\n"
         "QTabBar { tabbar-prefer-no-arrows: 0; tabbar-elide-mode: %1; }\n"
@@ -266,13 +254,11 @@ static QColor paneBorder(const ThemeTokens &t) {
     return separate(blendToward(t.onSurface, t.surface, 0.32), t.surface, 1.9);
 }
 
-// windows11 insets the first tab, never opens the selected one into the pane (zero base overlap) and marks it with a 45% fill.
 static QString windows11TabStyleSheet(const QPalette &pal, const ThemeTokens &t) {
     const auto hex = [](const QColor &c) { return c.name(QColor::HexRgb); };
     const QColor border = paneBorder(t);
     const QColor hover = separate(blendToward(t.accent, t.surface, 0.10), t.surface, 1.10);
     QColor selected = selectedFill(pal, t.surface, t.onSurface, t.accent);
-    // Readability of onSurface on the chip outranks how far the chip sits from the window.
     for (int i = 0; i < 8 && contrastRatio(t.onSurface, selected) < 4.5; ++i) {
         selected = blendToward(selected, t.surface, 0.6);
     }
@@ -295,7 +281,6 @@ static QString windows11TabStyleSheet(const QPalette &pal, const ThemeTokens &t)
           hex(pal.color(QPalette::Active, QPalette::Base)));
 }
 
-// QMacStyle cuts its pane border where its own centred tab bar would be (clipTabBarFrame), so the sheet draws the pane.
 static QString macPaneStyleSheet(const ThemeTokens &t) {
     return QStringLiteral(
         "QTabWidget::pane { border: 1px solid %1; border-radius: 6px; }\n"
@@ -304,7 +289,6 @@ static QString macPaneStyleSheet(const ThemeTokens &t) {
 }
 
 #ifdef Q_OS_MACOS
-// Rewrites only values equal to QMacStyle's form defaults: centred form, right-aligned labels, fields at size hint.
 class UniformFormLayouts : public QObject {
 public:
     using QObject::QObject;
@@ -334,7 +318,6 @@ private:
 #endif
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
-// The native title bars follow the requested scheme; each request re-reads the whole platform theme, so repeats are skipped.
 static void requestColorScheme(Qt::ColorScheme scheme) {
     static auto requested = Qt::ColorScheme::Unknown;
     if (scheme == requested) return;
@@ -343,8 +326,353 @@ static void requestColorScheme(Qt::ColorScheme scheme) {
 }
 #endif
 
+// Rewrites relative url(...) paths in stylesheets into absolute paths based on theme directory.
+static QString rewriteQssUrls(const QString &qss, const QString &themeDir) {
+    if (themeDir.isEmpty()) return qss;
+    QString normDir = QDir::fromNativeSeparators(themeDir);
+    if (!normDir.endsWith('/')) normDir += '/';
+
+    static const QRegularExpression urlRegex(QStringLiteral(R"(url\(\s*(["']?)([^)"']+)\1\s*\))"));
+    QString result;
+    int lastPos = 0;
+    auto it = urlRegex.globalMatch(qss);
+    while (it.hasNext()) {
+        auto match = it.next();
+        result.append(qss.mid(lastPos, match.capturedStart() - lastPos));
+        QString path = match.captured(2).trimmed();
+        if (path.startsWith(":/") || path.startsWith("http://") || path.startsWith("https://") ||
+            path.startsWith('/') || (path.length() > 2 && path[1] == ':')) {
+            result.append(match.captured(0));
+        } else {
+            QString fullPath = normDir + path;
+            result.append(QStringLiteral("url(\"%1\")").arg(fullPath));
+        }
+        lastPos = match.capturedEnd();
+    }
+    result.append(qss.mid(lastPos));
+    return result;
+}
+
+QString ThemeManager::themesDirectory() {
+    QString base = Configs::GetBasePath();
+    return QDir(base).filePath(QStringLiteral("themes"));
+}
+
+void ThemeManager::loadAvailableThemes() {
+    m_customThemes.clear();
+
+    // 1. Built-in custom themes
+    for (const auto &[key, colors] : builtInThemes().asKeyValueRange()) {
+        CustomThemeInfo info;
+        info.id = key;
+        info.name = key;
+        info.isBuiltIn = true;
+        info.hasColors = true;
+        info.colors = colors;
+        info.isDark = colors.windowText.lightness() > colors.window.lightness();
+        m_customThemes.insert(key.toLower(), info);
+    }
+
+    // 2. Discover third-party themes in themes directory
+    QStringList searchDirs;
+    searchDirs << themesDirectory();
+    QString appThemes = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("themes"));
+    if (appThemes != themesDirectory() && !searchDirs.contains(appThemes)) {
+        searchDirs << appThemes;
+    }
+
+    for (const auto &basePath : searchDirs) {
+        QDir dir(basePath);
+        if (!dir.exists()) continue;
+
+        const auto subDirs = dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+        for (const auto &subDirInfo : subDirs) {
+            QString folderPath = subDirInfo.filePath();
+            QDir themeDir(folderPath);
+
+            CustomThemeInfo info;
+            info.id = subDirInfo.fileName().toLower();
+            info.name = subDirInfo.fileName();
+            info.dirPath = folderPath;
+            info.isBuiltIn = false;
+
+            // Check for theme.json
+            QString jsonPath = themeDir.filePath(QStringLiteral("theme.json"));
+            if (QFile::exists(jsonPath)) {
+                QFile f(jsonPath);
+                if (f.open(QIODevice::ReadOnly)) {
+                    QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+                    if (doc.isObject()) {
+                        QJsonObject root = doc.object();
+                        if (root.contains("name")) info.name = root.value("name").toString();
+                        if (root.contains("id")) info.id = root.value("id").toString().toLower();
+                        if (root.contains("author")) info.author = root.value("author").toString();
+                        if (root.contains("version")) info.version = root.value("version").toString();
+                        if (root.contains("description")) info.description = root.value("description").toString();
+                        if (root.contains("base_style")) info.baseStyle = root.value("base_style").toString();
+                        if (root.contains("dark")) info.isDark = root.value("dark").toBool();
+
+                        if (root.contains("style")) {
+                            QString s = root.value("style").toString();
+                            if (QFile::exists(themeDir.filePath(s))) info.qssPath = themeDir.filePath(s);
+                        } else if (root.contains("qss")) {
+                            QString s = root.value("qss").toString();
+                            if (QFile::exists(themeDir.filePath(s))) info.qssPath = themeDir.filePath(s);
+                        }
+
+                        if (root.contains("colors") && root.value("colors").isObject()) {
+                            QJsonObject c = root.value("colors").toObject();
+                            auto col = [&](const char *key, const QColor &fallback = QColor()) -> QColor {
+                                if (c.contains(key)) return QColor(c.value(key).toString());
+                                return fallback;
+                            };
+                            info.hasColors = true;
+                            info.colors.window = col("window", Qt::white);
+                            info.colors.windowText = col("windowText", Qt::black);
+                            info.colors.base = col("base", Qt::white);
+                            info.colors.alternateBase = col("alternateBase", QColor(0xf0, 0xf0, 0xf0));
+                            info.colors.text = col("text", Qt::black);
+                            info.colors.button = col("button", QColor(0xe0, 0xe0, 0xe0));
+                            info.colors.buttonText = col("buttonText", Qt::black);
+                            info.colors.brightText = col("brightText", Qt::white);
+                            info.colors.highlight = col("highlight", QColor(0x3a, 0x8d, 0xff));
+                            info.colors.highlightedText = col("highlightedText", Qt::white);
+                            info.colors.link = col("link", QColor(0x1d, 0x6f, 0xb8));
+                            info.colors.tooltipBase = col("tooltipBase", info.colors.window);
+                            info.colors.tooltipText = col("tooltipText", info.colors.windowText);
+                            info.colors.placeholder = col("placeholder", QColor(0x9a, 0x9a, 0x9a));
+                            info.colors.disabledText = col("disabledText", QColor(0x80, 0x80, 0x80));
+                            info.colors.runningRow = col("runningRow", info.colors.alternateBase);
+
+                            if (!root.contains("dark")) {
+                                info.isDark = info.colors.windowText.lightness() > info.colors.window.lightness();
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Find QSS if not specified
+            if (info.qssPath.isEmpty()) {
+                QStringList qssCandidates = {
+                    QStringLiteral("style.qss"), QStringLiteral("theme.qss"),
+                    QStringLiteral("style.css"), QStringLiteral("theme.css"),
+                    info.name + QStringLiteral(".qss"), info.id + QStringLiteral(".qss")
+                };
+                for (const auto &cand : qssCandidates) {
+                    if (themeDir.exists(cand)) {
+                        info.qssPath = themeDir.filePath(cand);
+                        break;
+                    }
+                }
+                if (info.qssPath.isEmpty()) {
+                    const auto allQss = themeDir.entryList(QStringList() << "*.qss" << "*.css", QDir::Files);
+                    if (!allQss.isEmpty()) {
+                        info.qssPath = themeDir.filePath(allQss.first());
+                    }
+                }
+            }
+
+            // A folder is a valid theme if it contains a stylesheet, a theme.json, or custom icons
+            bool hasIcons = themeDir.exists(QStringLiteral("icons")) ||
+                            !themeDir.entryList(QStringList() << "*.png" << "*.svg", QDir::Files).isEmpty();
+
+            if (!info.qssPath.isEmpty() || info.hasColors || hasIcons) {
+                m_customThemes.insert(info.name.toLower(), info);
+                m_customThemes.insert(info.id.toLower(), info);
+            }
+        }
+    }
+
+    emit themesListUpdated();
+}
+
+QStringList ThemeManager::availableCustomThemeNames() const {
+    QStringList names;
+    for (const auto &info : m_customThemes.values()) {
+        if (!info.isBuiltIn && !names.contains(info.name)) {
+            names.append(info.name);
+        }
+    }
+    return names;
+}
+
+const CustomThemeInfo* ThemeManager::getThemeInfo(const QString &themeName) const {
+    auto it = m_customThemes.constFind(themeName.toLower());
+    if (it != m_customThemes.constEnd()) {
+        return &it.value();
+    }
+    return nullptr;
+}
+
+bool ThemeManager::isCustomTheme(const QString &themeName) const {
+    const auto *info = getThemeInfo(themeName);
+    return info && !info->isBuiltIn;
+}
+
+bool ThemeManager::isCurrentThemeDark() const {
+    const auto *info = getThemeInfo(current_theme);
+    if (info) return info->isDark;
+    const auto lower = current_theme.toLower();
+    if (lower.contains("vista") || lower.contains("flatgray") || lower.contains("lightblue") || lower.contains("softpink")) {
+        return false;
+    }
+    if (lower.contains("dark") || lower.contains("blacksoft")) {
+        return true;
+    }
+    return tokens.onSurface.lightness() > tokens.surface.lightness();
+}
+
+QString ThemeManager::getCustomIconPath(const QString &nameOrPath) const {
+    if (current_theme_dir.isEmpty()) return QString();
+
+    QString cleanName = nameOrPath;
+    if (cleanName.startsWith(QStringLiteral(":/icon/"))) cleanName = cleanName.mid(7);
+    else if (cleanName.startsWith(QStringLiteral(":/Throne/"))) cleanName = cleanName.mid(9);
+    else if (cleanName.startsWith(QStringLiteral(":/"))) cleanName = cleanName.mid(2);
+
+    QStringList candidates;
+    auto addVariants = [&](const QString &base) {
+        if (!base.endsWith(QStringLiteral(".png")) && !base.endsWith(QStringLiteral(".svg"))) {
+            candidates << base + QStringLiteral(".png");
+            candidates << base + QStringLiteral(".svg");
+        } else {
+            candidates << base;
+        }
+    };
+
+    addVariants(cleanName);
+    if (cleanName.startsWith(QStringLiteral("material/"))) {
+        addVariants(cleanName.mid(9));
+    } else {
+        addVariants(QStringLiteral("material/") + cleanName);
+    }
+    if (cleanName.startsWith(QStringLiteral("b-"))) {
+        addVariants(cleanName.mid(2));
+    } else {
+        addVariants(QStringLiteral("b-") + cleanName);
+    }
+
+    QDir themeDir(current_theme_dir);
+    for (const auto &cand : candidates) {
+        QString p1 = themeDir.filePath(QStringLiteral("icons/") + cand);
+        if (QFile::exists(p1)) return p1;
+        QString p2 = themeDir.filePath(cand);
+        if (QFile::exists(p2)) return p2;
+    }
+
+    return QString();
+}
+
+QIcon ThemeManager::getCustomIcon(const QString &nameOrPath) const {
+    QString path = getCustomIconPath(nameOrPath);
+    if (!path.isEmpty()) {
+        QPixmap pm(path);
+        if (!pm.isNull()) return QIcon(pm);
+    }
+    return QIcon();
+}
+
+bool ThemeManager::importThemeFromZip(const QString &zipFilePath, QString &outThemeName, QString &errorMsg) {
+    QFileInfo zipInfo(zipFilePath);
+    if (!zipInfo.exists() || !zipInfo.isFile()) {
+        errorMsg = tr("ZIP file does not exist: %1").arg(zipFilePath);
+        return false;
+    }
+
+    QString tempExtractPath = QDir(QDir::tempPath()).filePath(
+        QStringLiteral("throne_theme_%1").arg(QDateTime::currentMSecsSinceEpoch()));
+
+    if (!ZipUtils::extractZip(zipFilePath, tempExtractPath, errorMsg)) {
+        QDir(tempExtractPath).removeRecursively();
+        return false;
+    }
+
+    // Inspect extracted contents
+    QDir tempDir(tempExtractPath);
+    const auto entries = tempDir.entryInfoList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot);
+    QString effectiveThemeDir = tempExtractPath;
+
+    // If zip has a single root subfolder, drill down into it
+    if (entries.size() == 1 && entries.first().isDir()) {
+        effectiveThemeDir = entries.first().filePath();
+    }
+
+    QDir effDir(effectiveThemeDir);
+    QString themeJsonPath = effDir.filePath(QStringLiteral("theme.json"));
+    QStringList qssFiles = effDir.entryList(QStringList() << "*.qss" << "*.css", QDir::Files);
+    bool hasIcons = effDir.exists(QStringLiteral("icons")) ||
+                    !effDir.entryList(QStringList() << "*.png" << "*.svg", QDir::Files).isEmpty();
+
+    if (!QFile::exists(themeJsonPath) && qssFiles.isEmpty() && !hasIcons) {
+        errorMsg = tr("Invalid theme package: no theme.json, .qss stylesheet, or icons found in ZIP archive.");
+        tempDir.removeRecursively();
+        return false;
+    }
+
+    QString themeName;
+    QString themeId;
+    if (QFile::exists(themeJsonPath)) {
+        QFile f(themeJsonPath);
+        if (f.open(QIODevice::ReadOnly)) {
+            QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+            if (doc.isObject()) {
+                QJsonObject root = doc.object();
+                if (root.contains("name")) themeName = root.value("name").toString();
+                if (root.contains("id")) themeId = root.value("id").toString().toLower();
+            }
+        }
+    }
+
+    if (themeName.isEmpty()) {
+        themeName = zipInfo.baseName();
+    }
+    if (themeId.isEmpty()) {
+        themeId = themeName.toLower().replace(QRegularExpression(QStringLiteral("[^a-z0-9_\\-]")), QStringLiteral("_"));
+    }
+
+    QString destThemeDir = QDir(themesDirectory()).filePath(themeId);
+    QDir destDir(destThemeDir);
+    if (destDir.exists()) {
+        destDir.removeRecursively();
+    }
+    QDir().mkpath(themesDirectory());
+
+    bool success = ZipUtils::copyRecursively(effectiveThemeDir, destThemeDir);
+    tempDir.removeRecursively();
+
+    if (!success) {
+        errorMsg = tr("Failed to copy theme to %1").arg(destThemeDir);
+        return false;
+    }
+
+    loadAvailableThemes();
+    outThemeName = themeName;
+    return true;
+}
+
+bool ThemeManager::deleteTheme(const QString &themeName, QString &errorMsg) {
+    const auto *info = getThemeInfo(themeName);
+    if (!info || info->isBuiltIn || info->dirPath.isEmpty()) {
+        errorMsg = tr("Cannot delete built-in theme.");
+        return false;
+    }
+
+    QDir dir(info->dirPath);
+    if (!dir.removeRecursively()) {
+        errorMsg = tr("Failed to delete theme directory: %1").arg(info->dirPath);
+        return false;
+    }
+
+    if (current_theme.toLower() == themeName.toLower()) {
+        ApplyTheme(QStringLiteral("System"), true);
+    }
+
+    loadAvailableThemes();
+    return true;
+}
+
 void ThemeManager::ApplyTheme(const QString &theme, bool force) {
-    // A scheme request re-enters through MainWindow's colorSchemeChanged handler; the outer call finishes the job.
     if (applying) return;
     const QScopedValueRollback guard(applying, true);
 
@@ -354,6 +682,7 @@ void ThemeManager::ApplyTheme(const QString &theme, bool force) {
 #ifdef Q_OS_MACOS
         qApp->installEventFilter(new UniformFormLayouts(qApp));
 #endif
+        loadAvailableThemes();
     }
 
     if (this->current_theme == theme && !force) {
@@ -361,32 +690,49 @@ void ThemeManager::ApplyTheme(const QString &theme, bool force) {
     }
 
     const auto lowerTheme = theme.toLower();
-    const auto &themes = customThemes();
-    const bool leavingCustom = themes.contains(current_theme.toLower());
-    const bool enteringCustom = themes.contains(lowerTheme);
-    const ThemeColors colors = themes.value(lowerTheme);
+    const auto &builtins = builtInThemes();
+    const auto *customInfo = getThemeInfo(theme);
+
+    const bool wasCustom = !current_theme_dir.isEmpty() || builtins.contains(current_theme.toLower());
+    const bool isBuiltinCustom = builtins.contains(lowerTheme);
+    const bool isThirdParty = (customInfo && !customInfo->isBuiltIn);
 
     QString themeSheet;
     bool windows11Tabs = false;
     bool macosPane = false;
 
-    if (enteringCustom) {
-        // The whole palette goes on first, or a colour role leaks from Qt or the previous theme.
+    if (isBuiltinCustom) {
+        current_theme_dir = "";
+        const ThemeColors colors = builtins.value(lowerTheme);
         qApp->setPalette(buildThemePalette(colors));
 #if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
-        // After the palette: Qt darkens a title bar only while the app palette is dark.
         requestColorScheme(colors.windowText.lightness() > colors.window.lightness() ? Qt::ColorScheme::Dark : Qt::ColorScheme::Light);
 #endif
         themeSheet = lowerTheme == "qdarkstyle" ? ReadFileText(":/qdarkstyle/dark/darkstyle.qss")
                                                 : ReadFileText(":/qss/" + lowerTheme + ".css");
-    } else {
+    } else if (isThirdParty) {
+        current_theme_dir = customInfo->dirPath;
+        if (customInfo->hasColors) {
+            qApp->setPalette(buildThemePalette(customInfo->colors));
+        }
 #if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
-        // Before restyling: a style takes its palette from the platform theme, which honours the requested scheme.
+        requestColorScheme(customInfo->isDark ? Qt::ColorScheme::Dark : Qt::ColorScheme::Light);
+#endif
+        const QString baseStyle = customInfo->baseStyle.isEmpty() ? QStringLiteral("windows11") : customInfo->baseStyle;
+        qApp->setStyle(baseStyle);
+        windows11Tabs = baseStyle.compare(QStringLiteral("windows11"), Qt::CaseInsensitive) == 0;
+        macosPane = baseStyle.compare(QStringLiteral("macos"), Qt::CaseInsensitive) == 0;
+
+        if (!customInfo->qssPath.isEmpty()) {
+            QString rawSheet = ReadFileText(customInfo->qssPath);
+            themeSheet = rewriteQssUrls(rawSheet, customInfo->dirPath);
+        }
+    } else {
+        current_theme_dir = "";
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
         requestColorScheme(Qt::ColorScheme::Unknown);
 #endif
-        if (leavingCustom) {
-            // Drop the outgoing sheet before restyling, or its rules paint a frame against the
-            // incoming palette. A QStyleFactory style owns its own palette.
+        if (wasCustom) {
             qApp->setStyleSheet("");
             qApp->setPalette(system_palette);
         }
@@ -396,31 +742,34 @@ void ThemeManager::ApplyTheme(const QString &theme, bool force) {
         macosPane = styleName.compare(QStringLiteral("macos"), Qt::CaseInsensitive) == 0;
     }
 
-    // After setStyle(), which reinstalls the style's palette. Setting the sheet last is also
-    // what clears the render-rule cache; a bare setPalette() does not.
     tokens = resolveTokens(qApp->palette());
-    if (enteringCustom) {
+    if (isBuiltinCustom) {
+        const ThemeColors colors = builtins.value(lowerTheme);
         tokens.runningRow = colors.runningRow;
         tokens.onRunningRow = separate(colors.link, colors.runningRow, 4.5);
         tokens.runningMark = colors.link;
         const QColor light = Qt::white, dark(0x1E, 0x1E, 0x1E);
         tokens.onRunningMark = contrastRatio(light, colors.link) >= contrastRatio(dark, colors.link) ? light : dark;
+    } else if (isThirdParty && customInfo->hasColors) {
+        tokens.runningRow = customInfo->colors.runningRow;
+        tokens.onRunningRow = separate(customInfo->colors.link, customInfo->colors.runningRow, 4.5);
+        tokens.runningMark = customInfo->colors.link;
+        const QColor light = Qt::white, dark(0x1E, 0x1E, 0x1E);
+        tokens.onRunningMark = contrastRatio(light, customInfo->colors.link) >= contrastRatio(dark, customInfo->colors.link) ? light : dark;
     }
+
     QString sheet = themeSheet + overlayStyleSheet(tokens);
     if (windows11Tabs) sheet += windows11TabStyleSheet(qApp->palette(), tokens);
     if (macosPane) sheet += macPaneStyleSheet(tokens);
-    qApp->setStyleSheet(sheet);
 
-    // Every setStyle() above - setStyleSheet() runs one itself whenever it installs or drops the
-    // proxy - refills Qt's per-class platform font table (QMenu/QAbstractItemView/QMessageBox...),
-    // which outranks the app font. Re-asserting the font drops the table; the second sheet call is
-    // a plain repolish that re-resolves the widgets the table already stamped (#1829).
+    qApp->setStyleSheet(sheet);
     qApp->setFont(qApp->font());
     qApp->setStyleSheet(sheet);
 
     current_theme = theme;
     standardIcons.clear();
-    // Loaded with the restyle, so the next dialog's validation marks don't pay for them.
+    Icon::InvalidateTrayIconCache();
+
     for (const auto pixmap : {QStyle::SP_MessageBoxCritical, QStyle::SP_MessageBoxWarning}) standardIcon(pixmap);
 
     emit themeChanged(theme);
